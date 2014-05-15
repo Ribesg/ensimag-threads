@@ -8,6 +8,7 @@
 #include <complex.h>
 #include <stdbool.h>
 #include <unistd.h>
+#include <pthread.h>
 
 #include "tsp-types.h"
 #include "tsp-job.h"
@@ -64,6 +65,29 @@ static void usage(const char *name) {
     exit (-1);
 }
 
+/* Liste de threads */
+typedef struct thread_cell {
+    pthread_t tid;
+    struct thread_cell* next;
+} ThreadCell;
+
+/* Pour passer les arguments au TSP */
+typedef struct tsp_args {
+    int hops;
+    int len;
+    tsp_path_t* solution;
+    long long int* cuts;
+    tsp_path_t* sol;
+    int* sol_len;
+} TspArgs;
+
+void * tsp_wrapper(void * args) {
+    TspArgs *a = (TspArgs*) args;
+    tsp(a->hops, a->len, *(a->solution), a->cuts, *(a->sol), a->sol_len);
+    return (void*)42;
+}
+
+/* Main */
 int main (int argc, char **argv)
 {
     unsigned long long perf;
@@ -117,10 +141,37 @@ int main (int argc, char **argv)
     tsp_path_t solution;
     memset (solution, -1, MAX_TOWNS * sizeof (int));
     solution[0] = 0;
+    ThreadCell* list = NULL;
+    ThreadCell* cur = NULL;
     while (!empty_queue (&q)) {
         int hops = 0, len = 0;
         get_job (&q, solution, &hops, &len);
-        tsp (hops, len, solution, &cuts, sol, &sol_len);
+        ThreadCell* cell = (ThreadCell*) malloc(sizeof(ThreadCell));
+        TspArgs* args = (TspArgs*) malloc(sizeof(TspArgs));
+        args->hops = hops;
+        args->len = len;
+        args->solution = &solution;
+        args->cuts = &cuts;
+        args->sol = &sol;
+        args->sol_len = &sol_len;
+        pthread_create(&(cell->tid), NULL, tsp_wrapper, (void*)args);
+        if (!list) {
+            list = cell;
+            cur = list;
+        } else {
+            cur->next = cell;
+            cur = cur->next;
+        }
+    }
+
+    void * status;
+    while (list != NULL) {
+        pthread_join(list->tid, &status);
+        if (status == PTHREAD_CANCELED) {
+            printf("Thread cancelled");
+            exit(EXIT_FAILURE);
+        }
+        list = list->next;
     }
 
     clock_gettime (CLOCK_REALTIME, &t2);
