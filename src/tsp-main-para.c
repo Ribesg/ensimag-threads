@@ -71,19 +71,29 @@ typedef struct thread_cell {
     struct thread_cell* next;
 } ThreadCell;
 
-/* Pour passer les arguments au TSP */
-typedef struct tsp_args {
-    int hops;
-    int len;
-    tsp_path_t* solution;
-    long long int* cuts;
-    tsp_path_t* sol;
-    int* sol_len;
-} TspArgs;
+typedef struct worker_args {
+    struct tsp_queue * q;
+    tsp_path_t *solution;
+    long long int *cuts;
+    tsp_path_t *sol;
+    int * sol_len;
+} WorkerArgs; 
 
-void * tsp_wrapper(void * args) {
-    TspArgs *a = (TspArgs*) args;
-    tsp(a->hops, a->len, *(a->solution), a->cuts, *(a->sol), a->sol_len);
+pthread_mutex_t mutex_cuts = PTHREAD_MUTEX_INITIALIZER;
+
+void * tsp_worker(void * args) {
+    WorkerArgs * a = (WorkerArgs*) args;
+    long long int cuts;
+    while (!empty_queue(a->q)) {
+        int hops = 0, len = 0;
+        cuts = 0;
+        get_job(a->q, *(a->solution), &hops, &len); 
+        tsp(hops, len, *(a->solution), &cuts, *(a->sol), a->sol_len);
+       
+        pthread_mutex_lock(&mutex_cuts);
+        *(a->cuts) += cuts; 
+        pthread_mutex_unlock(&mutex_cuts);
+    }
     return (void*)42;
 }
 
@@ -143,18 +153,17 @@ int main (int argc, char **argv)
     solution[0] = 0;
     ThreadCell* list = NULL;
     ThreadCell* cur = NULL;
-    while (!empty_queue (&q)) {
-        int hops = 0, len = 0;
-        get_job (&q, solution, &hops, &len);
+
+    for (int i = 0; i < nb_threads; i++) {
         ThreadCell* cell = (ThreadCell*) malloc(sizeof(ThreadCell));
-        TspArgs* args = (TspArgs*) malloc(sizeof(TspArgs));
-        args->hops = hops;
-        args->len = len;
+        cell->next = NULL;
+        WorkerArgs* args = (WorkerArgs*) malloc(sizeof(WorkerArgs));
+        args->q = &q;
         args->solution = &solution;
         args->cuts = &cuts;
         args->sol = &sol;
         args->sol_len = &sol_len;
-        pthread_create(&(cell->tid), NULL, tsp_wrapper, (void*)args);
+        pthread_create(&(cell->tid), NULL, tsp_worker, (void*) args);
         if (!list) {
             list = cell;
             cur = list;
@@ -162,8 +171,9 @@ int main (int argc, char **argv)
             cur->next = cell;
             cur = cur->next;
         }
+        
     }
-
+    
     void * status;
     while (list != NULL) {
         pthread_join(list->tid, &status);
@@ -171,7 +181,9 @@ int main (int argc, char **argv)
             printf("Thread cancelled");
             exit(EXIT_FAILURE);
         }
+        ThreadCell* tmp = list;
         list = list->next;
+        free(tmp);
     }
 
     clock_gettime (CLOCK_REALTIME, &t2);
