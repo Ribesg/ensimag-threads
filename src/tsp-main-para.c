@@ -73,13 +73,14 @@ typedef struct thread_cell {
 
 typedef struct worker_args {
     struct tsp_queue * q;
-    tsp_path_t *solution;
+    tsp_path_t solution;
     long long int *cuts;
-    tsp_path_t *sol;
+    tsp_path_t sol;
     int * sol_len;
 } WorkerArgs; 
 
 pthread_mutex_t mutex_cuts = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t mutex_queue = PTHREAD_MUTEX_INITIALIZER;
 
 void * tsp_worker(void * args) {
     WorkerArgs * a = (WorkerArgs*) args;
@@ -87,13 +88,17 @@ void * tsp_worker(void * args) {
     while (!empty_queue(a->q)) {
         int hops = 0, len = 0;
         cuts = 0;
-        get_job(a->q, *(a->solution), &hops, &len); 
-        tsp(hops, len, *(a->solution), &cuts, *(a->sol), a->sol_len);
+        pthread_mutex_lock(&mutex_queue);
+        get_job(a->q, a->solution, &hops, &len); 
+        pthread_mutex_unlock(&mutex_queue);
+        
+        tsp(hops, len, a->solution, &cuts, a->sol, a->sol_len);
        
         pthread_mutex_lock(&mutex_cuts);
         *(a->cuts) += cuts; 
         pthread_mutex_unlock(&mutex_cuts);
     }
+    free(args);
     return (void*)42;
 }
 
@@ -159,9 +164,9 @@ int main (int argc, char **argv)
         cell->next = NULL;
         WorkerArgs* args = (WorkerArgs*) malloc(sizeof(WorkerArgs));
         args->q = &q;
-        args->solution = &solution;
+        memcpy(args->solution, solution, sizeof(tsp_path_t));
         args->cuts = &cuts;
-        args->sol = &sol;
+        memcpy(args->sol, sol, sizeof(tsp_path_t));
         args->sol_len = &sol_len;
         pthread_create(&(cell->tid), NULL, tsp_worker, (void*) args);
         if (!list) {
@@ -185,7 +190,7 @@ int main (int argc, char **argv)
         list = list->next;
         free(tmp);
     }
-
+    
     clock_gettime (CLOCK_REALTIME, &t2);
 
     if (affiche_sol)
@@ -195,6 +200,6 @@ int main (int argc, char **argv)
     printf("<!-- # = %d seed = %ld len = %d threads = %d time = %lld.%03lld ms ( %lld coupures ) -->\n",
             nb_towns, myseed, sol_len, nb_threads,
             perf/1000000ll, perf%1000000ll, cuts);
-
+    freemap();
     return 0 ;
 }

@@ -85,3 +85,8 @@ void genmap () {
       cutprefix[i] = prefix;
     }
 }
+
+void freemap() {
+    free(towns);
+    free(cutprefix);
+}

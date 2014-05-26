@@ -14,4 +14,5 @@ extern int *cutprefix;
 
 /* initialisation du tableau des distances */
 void genmap ();
+void freemap();
 #endif
